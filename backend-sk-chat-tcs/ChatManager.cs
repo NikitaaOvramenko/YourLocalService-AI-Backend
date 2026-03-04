@@ -20,9 +20,12 @@
             return chats1.Values.ToList();
         }
 
-        public ChatHistoryWrapper CreateChat(string id)
+        public ChatHistoryWrapper CreateChat(string id, string clientId)
         {
-            ChatHistoryWrapper chatHistory = new ChatHistoryWrapper(id);
+            ChatHistoryWrapper chatHistory = new ChatHistoryWrapper(id)
+            {
+                ClientId = clientId
+            };
 
             return chatHistory;
         }

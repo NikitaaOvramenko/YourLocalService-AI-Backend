@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build backend-sk-chat-tcs/backend-sk-chat-tcs.csproj)"
+    ]
+  }
+}

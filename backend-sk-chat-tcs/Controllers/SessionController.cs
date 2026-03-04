@@ -1,13 +1,9 @@
-﻿using backend_sk_chat_tcs.Models;
-using dotenv.net;
-using Microsoft.AspNetCore.Http;
+using backend_sk_chat_tcs.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Microsoft.SemanticKernel.Connectors.OpenAI;
-using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
-using static System.Net.Mime.MediaTypeNames;
 
 namespace backend_sk_chat_tcs.Controllers
 {
@@ -27,20 +23,17 @@ namespace backend_sk_chat_tcs.Controllers
         }
 
         [HttpPost("GetSession")]
-        public async Task<string> GetSessionIdAPI([FromBody] Session req)
+        public IActionResult GetSessionIdAPI([FromBody] Session req)
         {
-            var chat =  chatManager.CreateChat(req.Id);
+            var config = TenantRegistry.Get(req.ClientId);
+            if (config == null)
+                return BadRequest($"Unknown clientId: '{req.ClientId}'. Valid values: tcs-paints, tcs-junk-removal, appliance-repair");
 
-            chat.AddSystemMessage($"You are agent for TCS-PAINTS company, you will respond for this {req.Id}," +
-                $"You only answer for questions related to Paints and how user want to paint them especially (eg. color this wall in green and door in black) etc and this company and also users relevant message like (user introduction, user QA, human stuff). " +
-                $"If user asks something not related or off you respond like this: " +
-                $"I appreciate your question but please ask question related to today's theme and topic which is paints. " +
-                $"Also for example if user want you to modify(color) some surface from the image, YOU CAN DO THAT." +
-                $"Also Act Human and answer human like questions(eg. `hi``Hi my name is ...` `how are you ` and etc...)");
-
+            var chat = chatManager.CreateChat(req.Id, req.ClientId);
+            chat.AddSystemMessage(config.SystemPrompt);
             chatManager.AddChat(chat);
 
-            return req.Id;
+            return Ok(req.Id);
         }
 
         [HttpPost("EndChat")]
@@ -48,110 +41,89 @@ namespace backend_sk_chat_tcs.Controllers
         {
             var chat = chatManager.GetChat(req.Id);
 
-            if(chat == null)
+            if (chat == null)
             {
                 Console.WriteLine($"Chat not exist");
                 return NoContent();
-               
             }
 
             chatManager.RemoveChat(chat);
-            System.Diagnostics.Debug.Write($"Chat with ID {req.Id} is removed!\n");
-            Console.WriteLine($"Chat with ID {req.Id} is removed!\n");
+            Console.WriteLine($"Chat with ID {req.Id} is removed!");
 
             return NoContent();
-
         }
 
         [HttpPost("WriteToChat")]
         public async Task<string> WriteToChat([FromForm] Message req)
         {
-            var id = req.Id;
-            var messageText = req.MessageT;
-            var file = req.Image;
+            var chatForMessage = chatManager.GetChat(req.Id);
+            var config = TenantRegistry.Get(chatForMessage.ClientId);
 
             var message = new ChatMessageContentItemCollection
             {
-                new TextContent(messageText),
-                // We only add ImageContent explicitly if we want multimodal support later
+                new TextContent(req.MessageT),
             };
 
-            string? filePath = null;
-
-            
-            if (file != null && file.Length > 0)
+            if (req.Image != null && req.Image.Length > 0)
             {
-               
-                using var stream1 = file.OpenReadStream();
+                // Block image uploads for tenants that don't support them
+                if (config?.ImageUploadInstruction == null)
+                {
+                    return JsonSerializer.Serialize(new ResponseFormat
+                    {
+                        Message = "Image uploads are not supported for this service.",
+                        Url = null
+                    });
+                }
+
+                using var stream = req.Image.OpenReadStream();
                 using var ms = new MemoryStream();
-                await stream1.CopyToAsync(ms);
+                await stream.CopyToAsync(ms);
 
                 var bytes = ms.ToArray();
-                var uniqueName = $"Temp/{Guid.NewGuid()}_{file.FileName}";
+                var storagePath = $"Temp/{Guid.NewGuid()}_{req.Image.FileName}";
 
                 await supabase.Storage
                     .From("media")
-                    .Upload(bytes, uniqueName, new Supabase.Storage.FileOptions
+                    .Upload(bytes, storagePath, new Supabase.Storage.FileOptions
                     {
                         CacheControl = "3600",
                         Upsert = false
                     });
 
-                var publicUrl = supabase.Storage.From("media").GetPublicUrl(uniqueName);
+                var publicUrl = supabase.Storage.From("media").GetPublicUrl(storagePath);
 
-
-                // Add info for AI only if image exists
-                var chat = chatManager.GetChat(req.Id);
-                chat.AddSystemMessage(
-    $"The uploaded image is stored as '{publicUrl}'. " +
-    $"If the user asks to recolor or modify the image, call the function " +
-    $"ImageSurfaceColor.EditImageAsync with instruction = '{req.MessageT}' " +
-    $"and imageName = '{uniqueName}'." +
-    $"and Message should be `Image Updated!`" +
-    $"IF USER UPLOADED JUST AN IMAGE WITHOUT PROMPT DESCRIBING WHAT TO DO WITH IT DONT CALL ImageSurfaceColor.EditImageAsync, OUTPUT_RESPONSE: Specify what color you want it to be painted ? " 
-);
-
+                // Inject tenant-specific image instruction
+                // Tokens: {0} = publicUrl, {1} = storagePath, {2} = userMessage
+                chatForMessage.AddSystemMessage(
+                    string.Format(config.ImageUploadInstruction, publicUrl, storagePath, req.MessageT)
+                );
             }
 
-            // Add user message regardless of image
-            var chatForMessage = chatManager.GetChat(req.Id);
             chatManager.AddUserMessageToChat(chatForMessage, message);
 
             var settings = new OpenAIPromptExecutionSettings
             {
-
                 ResponseFormat = typeof(ResponseFormat),
                 ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions
-                //
             };
 
+            Console.WriteLine($"Chat with ID: {req.Id} (client: {chatForMessage.ClientId})");
+
             var chatResponse = "";
-
-            System.Diagnostics.Debug.Write($"Chat with ID: {req.Id}");
-            Console.WriteLine($"Chat with ID: {req.Id}");
-
-
             var completion = semanticKernel.ChatCompletionService.GetStreamingChatMessageContentsAsync(
                 chatHistory: chatForMessage,
                 executionSettings: settings,
                 kernel: semanticKernel.GetKernel()
             );
 
-
-
             await foreach (var content in completion)
             {
-
-      
-                System.Diagnostics.Debug.Write(content.Content);
                 Console.Write(content.Content);
                 chatResponse += content.Content;
             }
 
             chatManager.AddAIMessageToChat(chatForMessage, chatResponse);
-                
-
-
 
             return chatResponse;
         }

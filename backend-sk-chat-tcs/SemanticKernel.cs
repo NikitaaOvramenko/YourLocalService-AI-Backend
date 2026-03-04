@@ -37,6 +37,8 @@
 
 
             builder.Plugins.AddFromType<Estimate>();
+            builder.Plugins.AddFromType<JunkRemovalEstimate>();
+            builder.Plugins.AddFromType<ApplianceDiagnostic>();
             builder.Plugins.AddFromObject(new ImageSurfaceColor(supabase));
            
 

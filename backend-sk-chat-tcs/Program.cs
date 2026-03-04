@@ -13,20 +13,18 @@ Console.WriteLine("SUPABASE_KEY=" + Environment.GetEnvironmentVariable("SUPBASE_
 Console.WriteLine("OPENAI_APIKEY=" + Environment.GetEnvironmentVariable("OPENAI_APIKEY"));
 
 var builder = WebApplication.CreateBuilder(args);
-var page_url = Environment.GetEnvironmentVariable("PAGE_URL");
-Console.WriteLine($"Page_URL is: {page_url} ");
-
+var page_urls_raw = Environment.GetEnvironmentVariable("PAGE_URLS") ?? string.Empty;
+var page_urls = page_urls_raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+Console.WriteLine($"PAGE_URLS: {page_urls_raw}");
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowReactDev", policy =>
     {
-        policy.WithOrigins(page_url) // React dev server
+        policy.WithOrigins(page_urls)
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
-
-              
     });
 });
 

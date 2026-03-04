@@ -33,4 +33,4 @@ for part in response.candidates[0].content.parts:
         new_img.save(buffer, format="PNG")
         img_bytes = buffer.getvalue()
         base64_str = base64.b64encode(img_bytes).decode("utf-8")
-        print(base64_str)   # ✅ send Base64 to C#
+        print(base64_str)  

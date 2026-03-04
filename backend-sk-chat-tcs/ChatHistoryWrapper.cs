@@ -6,6 +6,8 @@ namespace backend_sk_chat_tcs
     {
 
         private string id;
+        public string ClientId { get; set; } = string.Empty;
+
         public ChatHistoryWrapper(string id)
         {
             this.id = id;
